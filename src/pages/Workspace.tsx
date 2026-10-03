@@ -92,7 +92,7 @@ function buildWorkflowGraph(
    */
   nodes.push({
     id: 'goal-node',
-    label: 'GOAL',
+    label: workflow.goal,
     description: workflow.goal,
     type: 'goal',
   })
@@ -115,7 +115,10 @@ function buildWorkflowGraph(
    */
   nodes.push({
     id: 'verify-node',
-    label: 'VERIFY',
+    label:
+  workflow.verification.length > 0
+    ? workflow.verification[0].label
+    : 'Verify goal completion',
     description:
       workflow.verification.length > 0
         ? workflow.verification
@@ -133,7 +136,7 @@ function buildWorkflowGraph(
    */
   nodes.push({
     id: 'outcome-node',
-    label: 'OUTCOME',
+    label: workflow.outcome,
     description: workflow.outcome,
     type: 'outcome',
   })

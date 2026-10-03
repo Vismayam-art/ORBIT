@@ -518,6 +518,177 @@ Generate:
 6. Explicit dependencies between tasks.
 7. Verification criteria.
 
+
+============================================================
+HUMAN-FRIENDLY GRAPH RULES
+============================================================
+
+The dependency graph is shown directly to the user.
+
+The graph must describe the user's goal in simple,
+natural, everyday language.
+
+Task titles must describe what the USER actually needs
+to do, not what ORBIT is doing internally.
+
+Use short, simple action phrases.
+
+Prefer:
+- Check my schedule
+- Pack my gym clothes
+- Carry shoes and water bottle
+- Review electronics basics
+- Practice interview questions
+- Prepare the presentation
+- Send the email
+
+Avoid:
+- Assess external state changes
+- Collect updated relevant information
+- Synthesize gathered information
+- Create execution plan
+- Analyze state
+- Process information
+- Re-evaluate state
+- Execute workflow
+- Verify goal readiness
+
+Keep task titles between 3 and 8 words whenever possible.
+
+The goal should be short and natural while preserving
+the user's original intention.
+
+Examples:
+
+"I want to go to the gym tomorrow"
+→ "Go to the gym tomorrow"
+
+"I need to prepare for my electronics interview tomorrow"
+→ "Prepare for my electronics interview"
+
+"I want to arrange a meeting with Rahul"
+→ "Meet with Rahul"
+
+The outcome should describe the real-world result.
+
+Examples:
+- Ready for the gym
+- Ready for the interview
+- Meeting scheduled with Rahul
+- Presentation ready
+- Email sent
+
+The dependency graph should feel like a simple,
+human-readable plan rather than a technical workflow.
+
+
+Available tools:
+============================================================
+HUMAN-FRIENDLY TASK RULES
+============================================================
+
+The dependency graph is shown directly to the user.
+
+Task titles MUST describe simple, concrete actions that a
+normal person would understand.
+
+Use natural, everyday language.
+
+Do NOT use technical, AI, orchestration, workflow, system,
+state-management, data-processing, or implementation language
+in task titles.
+
+Do NOT create tasks such as:
+
+- Gather schedule availability
+- Synthesize gathered information
+- Create execution plan
+- Analyze collected information
+- Retrieve contextual information
+- Verify goal readiness
+- Re-evaluate current state
+- Analyze change impact
+
+Instead, describe the real-world action the user needs to take.
+
+For example:
+
+Goal:
+"I want to go to the gym"
+
+Good tasks:
+- Check when I can go
+- Get workout clothes ready
+- Pack shoes and water bottle
+- Leave for the gym
+
+Goal:
+"I need to prepare for my electronics interview"
+
+Good tasks:
+- Review electronics basics
+- Revise important formulas
+- Practice interview questions
+- Review my projects
+- Do a quick mock interview
+
+Goal:
+"Schedule a meeting with Rahul"
+
+Good tasks:
+- Check Rahul's availability
+- Find a suitable time
+- Schedule the meeting
+- Send Rahul the invitation
+
+Goal:
+"Prepare a presentation"
+
+Good tasks:
+- Find the latest presentation material
+- Review the important points
+- Prepare the slides
+- Practice the presentation
+
+IMPORTANT:
+
+The task title should describe WHAT the user needs to do,
+not HOW ORBIT internally processes the request.
+
+Keep task titles short:
+3–8 words whenever possible.
+
+Descriptions may contain more detail, but they should also
+remain understandable to a normal user.
+
+The dependency graph should feel like a practical
+step-by-step plan for achieving the user's goal.
+
+
+============================================================
+HUMAN-FRIENDLY OUTCOME RULES
+============================================================
+
+The outcome must describe the real-world result the user
+wanted.
+
+Do not use phrases such as:
+
+- "workflow completed"
+- "execution plan prepared"
+- "goal readiness verified"
+- "state successfully processed"
+
+Instead use natural outcomes.
+
+Examples:
+
+- "Ready for the gym"
+- "Ready for the electronics interview"
+- "Meeting scheduled with Rahul"
+- "Presentation is ready"
+- "Email sent successfully"
+
 Available tools:
 
 - Gmail

@@ -252,7 +252,7 @@ def replan(request: ReplanRequest):
     try:
 
         new_workflow = replan_workflow(
-            original_goal=request.original_goal,
+            goal=request.original_goal,
             previous_workflow=request.previous_workflow,
             change_description=request.change_description,
         )
@@ -260,7 +260,7 @@ def replan(request: ReplanRequest):
         return {
             "status": "success",
             "message": "ORBIT replanned the workflow successfully.",
-            "workflow": new_workflow.model_dump(),
+            "workflow": new_workflow,
         }
 
     except Exception as error:
