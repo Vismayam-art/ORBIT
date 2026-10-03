@@ -1,20 +1,19 @@
 import os
-from typing import Any
+import json
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from groq import Groq
 from pydantic import BaseModel, Field
 
 
 # ============================================================
-# GEMINI CLIENT
+# GROQ CLIENT
 # ============================================================
 
 load_dotenv()
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY")
 )
 
 
@@ -50,7 +49,7 @@ class GoalCompilation(BaseModel):
 
 
 # ============================================================
-# TOOL DEFINITIONS
+# AVAILABLE TOOLS
 # ============================================================
 
 AVAILABLE_TOOLS = [
@@ -63,16 +62,11 @@ AVAILABLE_TOOLS = [
 
 
 # ============================================================
-# TOOL ROUTING HELPERS
+# TOOL ROUTING
 # ============================================================
 
 
 def normalize_tool_name(tool: str) -> str:
-    """
-    Convert Gemini's tool name into one of ORBIT's
-    supported canonical tool names.
-    """
-
     value = str(tool or "").strip().lower()
 
     if "gmail" in value or "email" in value:
@@ -81,23 +75,27 @@ def normalize_tool_name(tool: str) -> str:
     if "calendar" in value or "schedule" in value:
         return "Calendar"
 
-    if "drive" in value or "file" in value or "document" in value:
+    if (
+        "drive" in value
+        or "file" in value
+        or "document" in value
+    ):
         return "Drive"
 
     if "web" in value or "search" in value:
         return "Web"
 
-    if "orbit" in value or "plan" in value or "verify" in value:
+    if (
+        "orbit" in value
+        or "plan" in value
+        or "verify" in value
+    ):
         return "ORBIT"
 
     return "ORBIT"
 
 
 def task_text(task: Task) -> str:
-    """
-    Combine task title and description for routing decisions.
-    """
-
     return (
         f"{task.title} "
         f"{task.description}"
@@ -105,15 +103,6 @@ def task_text(task: Task) -> str:
 
 
 def infer_tool_from_task(task: Task) -> str:
-    """
-    Deterministically select the most appropriate tool
-    from the task's actual purpose.
-
-    This acts as a safety layer around Gemini so that
-    Calendar / Drive / Gmail are not randomly replaced
-    by ORBIT.
-    """
-
     text = task_text(task)
 
     # --------------------------------------------------------
@@ -238,18 +227,10 @@ def infer_tool_from_task(task: Task) -> str:
     ):
         return "Web"
 
-    # --------------------------------------------------------
-    # ORBIT
-    # --------------------------------------------------------
-
     return "ORBIT"
 
 
 def determine_risk(task: Task) -> str:
-    """
-    Enforce high risk for actions that create external side effects.
-    """
-
     text = task_text(task)
 
     high_risk_keywords = [
@@ -283,21 +264,13 @@ def determine_risk(task: Task) -> str:
 
 
 # ============================================================
-# SPECIALIZED EMAIL + MEETING WORKFLOW
+# SPECIAL EMAIL + MEETING WORKFLOW
 # ============================================================
 
 
 def create_email_meeting_workflow(
     goal: str,
 ) -> GoalCompilation:
-    """
-    Deterministic workflow for the main ORBIT demonstration:
-
-    Send an email containing the latest meeting update.
-
-    This guarantees the demo uses:
-        Gmail -> Calendar -> Drive -> ORBIT -> Gmail
-    """
 
     tasks = [
         Task(
@@ -451,15 +424,6 @@ def create_email_meeting_workflow(
 def normalize_workflow(
     workflow: GoalCompilation,
 ) -> GoalCompilation:
-    """
-    Repair Gemini's tool selection without replacing
-    its overall workflow.
-
-    Gemini remains responsible for planning.
-
-    ORBIT then checks whether each task is using
-    the appropriate connected tool.
-    """
 
     normalized_tasks: list[Task] = []
 
@@ -488,7 +452,7 @@ def normalize_workflow(
 
 
 # ============================================================
-# GEMINI WORKFLOW COMPILER
+# GOAL COMPILER
 # ============================================================
 
 
@@ -499,7 +463,7 @@ def compile_goal(
     goal_lower = goal.lower()
 
     # --------------------------------------------------------
-    # SPECIAL DEMO ROUTE
+    # SPECIAL EMAIL + MEETING ROUTE
     # --------------------------------------------------------
 
     email_goal = (
@@ -517,6 +481,7 @@ def compile_goal(
     )
 
     if email_goal:
+
         print(
             "ORBIT detected the email + meeting "
             "workflow. Using controlled tool routing."
@@ -527,7 +492,7 @@ def compile_goal(
         )
 
     # --------------------------------------------------------
-    # GEMINI PROMPT
+    # GROQ PROMPT
     # --------------------------------------------------------
 
     prompt = f"""
@@ -568,7 +533,9 @@ IMPORTANT TOOL SELECTION RULES
 Use the tool that actually owns the information or action.
 
 GMAIL:
+
 Use Gmail for:
+
 - finding email addresses
 - reading emails
 - searching messages
@@ -577,7 +544,9 @@ Use Gmail for:
 - replying to emails
 
 CALENDAR:
+
 Use Calendar for:
+
 - finding meetings
 - finding events
 - checking dates
@@ -587,7 +556,9 @@ Use Calendar for:
 - identifying meeting times
 
 DRIVE:
+
 Use Drive for:
+
 - finding files
 - finding documents
 - reading stored notes
@@ -598,14 +569,18 @@ Use Drive for:
 - accessing files stored in Drive
 
 WEB:
+
 Use Web for:
+
 - public web information
 - internet research
 - websites
 - public news
 
 ORBIT:
+
 Use ORBIT for:
+
 - reasoning
 - analyzing collected information
 - combining information from multiple tools
@@ -624,18 +599,23 @@ is the correct source of information.
 For example:
 
 "Find the latest meeting"
+
 MUST use Calendar.
 
 "Find meeting notes"
+
 MUST use Drive.
 
 "Find team email addresses"
+
 MUST use Gmail.
 
 "Send an email"
+
 MUST use Gmail.
 
 "Analyze the collected information"
+
 SHOULD use ORBIT.
 
 ============================================================
@@ -687,25 +667,52 @@ Return only the structured workflow.
 
     try:
 
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=GoalCompilation,
+        response = client.chat.completions.create(
+            model=os.getenv(
+                "GROQ_MODEL",
+                "openai/gpt-oss-120b",
             ),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are ORBIT, an autonomous outcome engine. "
+                        "Return only valid JSON matching the requested "
+                        "workflow structure. Do not include Markdown "
+                        "or explanatory text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            response_format={
+                "type": "json_object"
+            },
         )
 
-        if not response.parsed:
+        if not response.choices:
             raise RuntimeError(
-                "Gemini returned an empty workflow."
+                "Groq returned no workflow response."
             )
 
-        workflow = response.parsed
+        response_text = (
+            response.choices[0].message.content
+        )
 
-        # ----------------------------------------------------
-        # ORBIT TOOL VALIDATION LAYER
-        # ----------------------------------------------------
+        if not response_text:
+            raise RuntimeError(
+                "Groq returned an empty workflow."
+            )
+
+        workflow_data = json.loads(
+            response_text
+        )
+
+        workflow = GoalCompilation(
+            **workflow_data
+        )
 
         workflow = normalize_workflow(
             workflow
@@ -715,18 +722,18 @@ Return only the structured workflow.
 
     except Exception as error:
 
-        if is_quota_error(error):
+        print(
+            "Groq unavailable or workflow parsing failed. "
+            "Using ORBIT local fallback compiler."
+        )
 
-            print(
-                "Gemini quota exhausted. "
-                "Using ORBIT local fallback compiler."
-            )
+        print(
+            f"Groq error: {error}"
+        )
 
-            return fallback_compile_goal(
-                goal
-            )
-
-        raise
+        return fallback_compile_goal(
+            goal
+        )
 
 
 # ============================================================
@@ -742,38 +749,24 @@ def replan_workflow(
     """
     Goal-aware replanning.
 
-    Deterministic goal-aware planning is intentionally
-    preferred for the hackathon MVP so that replanning
-    remains reliable even when Gemini quota is exhausted.
+    The original goal is preserved.
+
+    The previous workflow and newly detected state change
+    are used to generate an updated workflow.
+
+    If Groq is unavailable, ORBIT uses the deterministic
+    fallback replanner.
     """
 
-    try:
-        replanned = fallback_replan_workflow(
-            goal=goal,
-            previous_workflow=previous_workflow,
-            change_description=change_description,
-        )
-
-        return normalize_workflow(
-            replanned,
-        )
-
-    except Exception as error:
-        print(
-            f"Goal-aware replanning failed: {error}"
-        )
-
-        return normalize_workflow(
-            fallback_replan_workflow(
-                goal=goal,
-                previous_workflow=previous_workflow,
-                change_description=change_description,
-            )
-        )
+    original_goal = str(
+        goal or ""
+    ).strip()
 
     # --------------------------------------------------------
     # SPECIAL EMAIL + MEETING REPLAN
     # --------------------------------------------------------
+
+    original_lower = original_goal.lower()
 
     email_goal = (
         (
@@ -799,18 +792,20 @@ def replan_workflow(
             original_goal
         )
 
-        workflow.current_state.append(
-            f"External state changed: {change_description}"
-        )
+        workflow.current_state = [
+            f"External state changed: {change_description}",
+            "Previous workflow information may be stale.",
+            "Affected Calendar, Drive and Gmail state must be re-checked.",
+        ]
 
         workflow.constraints.append(
-            "Re-check affected information before continuing."
+            "Re-check changed external state before continuing."
         )
 
-        return workflow
+        return workflow.model_dump()
 
     # --------------------------------------------------------
-    # GEMINI REPLAN PROMPT
+    # REPLAN PROMPT
     # --------------------------------------------------------
 
     prompt = f"""
@@ -900,44 +895,90 @@ Return only the updated structured workflow.
 
     try:
 
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=GoalCompilation,
+        response = client.chat.completions.create(
+            model=os.getenv(
+                "GROQ_MODEL",
+                "openai/gpt-oss-120b",
             ),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are ORBIT, an autonomous outcome engine. "
+                        "Return only valid JSON matching the requested "
+                        "workflow structure. Do not include Markdown "
+                        "or explanatory text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            response_format={
+                "type": "json_object"
+            },
         )
 
-        if not response.parsed:
+        if not response.choices:
             raise RuntimeError(
-                "Gemini returned an empty replanned workflow."
+                "Groq returned no replanned workflow response."
             )
 
-        workflow = response.parsed
+        response_text = (
+            response.choices[0].message.content
+        )
+
+        if not response_text:
+            raise RuntimeError(
+                "Groq returned an empty replanned workflow."
+            )
+
+        workflow_data = json.loads(
+            response_text
+        )
+
+        workflow = GoalCompilation(
+            **workflow_data
+        )
 
         workflow = normalize_workflow(
             workflow
         )
 
-        return workflow
+        return workflow.model_dump()
 
     except Exception as error:
 
-        if is_quota_error(error):
+        print(
+            "Groq unavailable or replanning failed. "
+            "Using ORBIT local fallback replanner."
+        )
 
-            print(
-                "Gemini quota exhausted during replanning. "
-                "Using ORBIT local fallback replanner."
-            )
+        print(
+            f"Groq replan error: {error}"
+        )
 
-            return fallback_replan_workflow(
-                original_goal=original_goal,
-                previous_workflow=previous_workflow,
-                change_description=change_description,
-            )
+        # IMPORTANT:
+        # fallback_replan_workflow returns a dict.
+        # Convert it into GoalCompilation before
+        # passing it to normalize_workflow.
 
-        raise
+        replanned_data = fallback_replan_workflow(
+            goal=original_goal,
+            previous_workflow=previous_workflow,
+            change_description=change_description,
+        )
+
+        replanned = GoalCompilation(
+            **replanned_data
+        )
+
+        replanned = normalize_workflow(
+            replanned
+        )
+
+        return replanned.model_dump()
 
 
 # ============================================================
@@ -949,7 +990,9 @@ def is_quota_error(
     error: Exception,
 ) -> bool:
 
-    error_text = str(error).lower()
+    error_text = str(
+        error
+    ).lower()
 
     quota_indicators = [
         "resource_exhausted",
@@ -967,18 +1010,34 @@ def is_quota_error(
 
 
 # ============================================================
-# LOCAL FALLBACK COMPILER
+# LOCAL FALLBACK REPLANNER
 # ============================================================
 
 
-def fallback_compile_goal(
+def fallback_replan_workflow(
     goal: str,
-) -> GoalCompilation:
+    previous_workflow: dict,
+    change_description: str,
+) -> dict:
+    """
+    Goal-aware deterministic replanning fallback.
 
-    goal_lower = goal.lower()
+    The original goal is preserved.
+    The plan changes according to the detected state.
+    """
+
+    goal_text = str(
+        goal or ""
+    ).strip()
+
+    change_text = str(
+        change_description or ""
+    ).strip()
+
+    goal_lower = goal_text.lower()
 
     # --------------------------------------------------------
-    # EMAIL + MEETING FALLBACK
+    # EMAIL + MEETING
     # --------------------------------------------------------
 
     email_goal = (
@@ -997,9 +1056,668 @@ def fallback_compile_goal(
 
     if email_goal:
 
-        return create_email_meeting_workflow(
-            goal
+        workflow = create_email_meeting_workflow(
+            goal_text
         )
+
+        workflow.current_state = [
+            f"External state changed: {change_text}",
+            "Previous workflow information may be stale.",
+            "Affected Calendar, Drive and Gmail state must be re-checked.",
+        ]
+
+        workflow.constraints.append(
+            "Re-check changed external state before continuing."
+        )
+
+        return workflow.model_dump()
+
+    # --------------------------------------------------------
+    # INTERVIEW
+    # --------------------------------------------------------
+
+    if any(
+        keyword in goal_lower
+        for keyword in [
+            "interview",
+            "prepare for interview",
+            "interview preparation",
+        ]
+    ):
+
+        tasks = [
+            {
+                "id": "replan_interview_01",
+                "title": "Re-check interview requirements",
+                "description": (
+                    "Re-evaluate the information relevant to "
+                    "the interview after the detected state change."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [],
+            },
+
+            {
+                "id": "replan_interview_02",
+                "title": "Prioritize preparation",
+                "description": (
+                    "Adjust the interview preparation priorities "
+                    "based on the newly detected state."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_interview_01"
+                ],
+            },
+
+            {
+                "id": "replan_interview_03",
+                "title": "Update preparation plan",
+                "description": (
+                    "Create an updated preparation sequence "
+                    "that still targets the original interview goal."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_interview_02"
+                ],
+            },
+
+            {
+                "id": "replan_interview_04",
+                "title": "Verify interview readiness",
+                "description": (
+                    "Verify that the updated preparation plan "
+                    "still satisfies the original interview goal."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_interview_03"
+                ],
+            },
+        ]
+
+        verification = [
+            {
+                "id": "verify_interview_requirements",
+                "label": "Interview requirements re-evaluated",
+                "description": (
+                    "The changed state was incorporated into "
+                    "the interview preparation workflow."
+                ),
+            },
+
+            {
+                "id": "verify_interview_priorities",
+                "label": "Preparation priorities updated",
+                "description": (
+                    "Preparation priorities reflect the new state."
+                ),
+            },
+
+            {
+                "id": "verify_interview_plan",
+                "label": "Updated preparation plan created",
+                "description": (
+                    "A revised plan still targets the original goal."
+                ),
+            },
+
+            {
+                "id": "verify_interview_readiness",
+                "label": "Interview readiness verified",
+                "description": (
+                    "The revised plan remains aligned with "
+                    "the original interview preparation goal."
+                ),
+            },
+        ]
+
+        return {
+            "goal": goal_text,
+
+            "outcome": (
+                "Prepare successfully for the interview "
+                "using an updated plan that accounts for "
+                "the detected change."
+            ),
+
+            "current_state": [
+                "External state changed during execution.",
+                change_text,
+                "The previous plan may contain outdated assumptions.",
+            ],
+
+            "tasks": tasks,
+
+            "verification": verification,
+        }
+
+    # --------------------------------------------------------
+    # GYM / FITNESS
+    # --------------------------------------------------------
+
+    if any(
+        keyword in goal_lower
+        for keyword in [
+            "gym",
+            "workout",
+            "exercise",
+            "fitness",
+        ]
+    ):
+
+        tasks = [
+            {
+                "id": "replan_gym_01",
+                "title": "Re-check workout timing",
+                "description": (
+                    "Re-evaluate the available preparation time "
+                    "after the detected change."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [],
+            },
+
+            {
+                "id": "replan_gym_02",
+                "title": "Prioritize gym preparation",
+                "description": (
+                    "Prioritize the preparation activities "
+                    "that are still necessary for the workout."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_gym_01"
+                ],
+            },
+
+            {
+                "id": "replan_gym_03",
+                "title": "Update gym preparation plan",
+                "description": (
+                    "Adjust the preparation sequence according "
+                    "to the newly detected state."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_gym_02"
+                ],
+            },
+
+            {
+                "id": "replan_gym_04",
+                "title": "Verify gym readiness",
+                "description": (
+                    "Verify that the updated preparation plan "
+                    "still satisfies the original gym goal."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_gym_03"
+                ],
+            },
+        ]
+
+        verification = [
+            {
+                "id": "verify_gym_timing",
+                "label": "Workout timing re-evaluated",
+                "description": (
+                    "Available preparation time was incorporated."
+                ),
+            },
+
+            {
+                "id": "verify_gym_priorities",
+                "label": "Preparation priorities updated",
+                "description": (
+                    "Required gym preparation activities were reprioritized."
+                ),
+            },
+
+            {
+                "id": "verify_gym_plan",
+                "label": "Updated gym plan created",
+                "description": (
+                    "A revised preparation plan was generated."
+                ),
+            },
+
+            {
+                "id": "verify_gym_readiness",
+                "label": "Gym readiness verified",
+                "description": (
+                    "The updated plan remains aligned with "
+                    "the original gym preparation goal."
+                ),
+            },
+        ]
+
+        return {
+            "goal": goal_text,
+
+            "outcome": (
+                "Be prepared for the workout using an updated "
+                "plan that accounts for the detected change."
+            ),
+
+            "current_state": [
+                "External state changed during execution.",
+                change_text,
+                "The previous preparation plan may contain outdated assumptions.",
+            ],
+
+            "tasks": tasks,
+
+            "verification": verification,
+        }
+
+    # --------------------------------------------------------
+    # MEETING
+    # --------------------------------------------------------
+
+    if any(
+        keyword in goal_lower
+        for keyword in [
+            "meeting",
+            "meet",
+            "meeting preparation",
+        ]
+    ):
+
+        tasks = [
+            {
+                "id": "replan_meeting_01",
+                "title": "Re-check meeting details",
+                "description": (
+                    "Re-evaluate the latest meeting information "
+                    "after the detected change."
+                ),
+                "tool": "Calendar",
+                "risk": "low",
+                "depends_on": [],
+            },
+
+            {
+                "id": "replan_meeting_02",
+                "title": "Analyze meeting impact",
+                "description": (
+                    "Determine which preparation requirements "
+                    "changed as a result of the new state."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_meeting_01"
+                ],
+            },
+
+            {
+                "id": "replan_meeting_03",
+                "title": "Update meeting preparation",
+                "description": (
+                    "Create an updated preparation plan for "
+                    "the original meeting objective."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_meeting_02"
+                ],
+            },
+
+            {
+                "id": "replan_meeting_04",
+                "title": "Verify meeting readiness",
+                "description": (
+                    "Verify that the updated plan still "
+                    "satisfies the original meeting goal."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_meeting_03"
+                ],
+            },
+        ]
+
+        verification = [
+            {
+                "id": "verify_meeting_details",
+                "label": "Meeting details re-checked",
+                "description": (
+                    "Current meeting state was incorporated."
+                ),
+            },
+
+            {
+                "id": "verify_meeting_impact",
+                "label": "Meeting impact analyzed",
+                "description": (
+                    "The effect of the change was analyzed."
+                ),
+            },
+
+            {
+                "id": "verify_meeting_plan",
+                "label": "Meeting plan updated",
+                "description": (
+                    "The preparation workflow was updated."
+                ),
+            },
+
+            {
+                "id": "verify_meeting_readiness",
+                "label": "Meeting readiness verified",
+                "description": (
+                    "The revised workflow still satisfies "
+                    "the original meeting objective."
+                ),
+            },
+        ]
+
+        return {
+            "goal": goal_text,
+
+            "outcome": (
+                "Remain prepared for the meeting using an "
+                "updated plan that accounts for the detected change."
+            ),
+
+            "current_state": [
+                "External state changed during execution.",
+                change_text,
+                "Meeting information may have changed.",
+            ],
+
+            "tasks": tasks,
+
+            "verification": verification,
+        }
+
+    # --------------------------------------------------------
+    # EMAIL
+    # --------------------------------------------------------
+
+    if any(
+        keyword in goal_lower
+        for keyword in [
+            "send email",
+            "email",
+            "mail",
+        ]
+    ):
+
+        tasks = [
+            {
+                "id": "replan_email_01",
+                "title": "Re-check email context",
+                "description": (
+                    "Re-evaluate the information required "
+                    "for the original email goal."
+                ),
+                "tool": "Gmail",
+                "risk": "low",
+                "depends_on": [],
+            },
+
+            {
+                "id": "replan_email_02",
+                "title": "Analyze impact of the change",
+                "description": (
+                    "Determine how the changed state affects "
+                    "the original email objective."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_email_01"
+                ],
+            },
+
+            {
+                "id": "replan_email_03",
+                "title": "Update email plan",
+                "description": (
+                    "Update the email workflow while preserving "
+                    "the original communication objective."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_email_02"
+                ],
+            },
+
+            {
+                "id": "replan_email_04",
+                "title": "Verify email readiness",
+                "description": (
+                    "Verify that the updated workflow is ready "
+                    "to satisfy the original email goal."
+                ),
+                "tool": "ORBIT",
+                "risk": "low",
+                "depends_on": [
+                    "replan_email_03"
+                ],
+            },
+        ]
+
+        verification = [
+            {
+                "id": "verify_email_context",
+                "label": "Email context re-checked",
+                "description": (
+                    "Required communication context was refreshed."
+                ),
+            },
+
+            {
+                "id": "verify_email_impact",
+                "label": "Change impact analyzed",
+                "description": (
+                    "The effect of the changed state was evaluated."
+                ),
+            },
+
+            {
+                "id": "verify_email_plan",
+                "label": "Email plan updated",
+                "description": (
+                    "The email workflow was updated."
+                ),
+            },
+
+            {
+                "id": "verify_email_readiness",
+                "label": "Email workflow verified",
+                "description": (
+                    "The updated workflow remains aligned "
+                    "with the original goal."
+                ),
+            },
+        ]
+
+        return {
+            "goal": goal_text,
+
+            "outcome": (
+                "Complete the original email objective using "
+                "an updated plan that accounts for the detected change."
+            ),
+
+            "current_state": [
+                "External state changed during execution.",
+                change_text,
+                "Previous email context may be outdated.",
+            ],
+
+            "tasks": tasks,
+
+            "verification": verification,
+        }
+
+    # --------------------------------------------------------
+    # GENERIC GOAL-AWARE FALLBACK
+    # --------------------------------------------------------
+
+    previous_tasks = (
+        previous_workflow.get(
+            "tasks",
+            [],
+        )
+        if isinstance(previous_workflow, dict)
+        else []
+    )
+
+    first_tool = "ORBIT"
+
+    if previous_tasks:
+
+        previous_tools = [
+            str(
+                task.get(
+                    "tool",
+                    "ORBIT"
+                )
+            )
+            for task in previous_tasks
+            if isinstance(task, dict)
+        ]
+
+        if previous_tools:
+            first_tool = previous_tools[0]
+
+    tasks = [
+        {
+            "id": "replan_generic_01",
+            "title": "Re-check goal state",
+            "description": (
+                "Re-evaluate the information affected by "
+                "the detected change while preserving the original goal."
+            ),
+            "tool": first_tool,
+            "risk": "low",
+            "depends_on": [],
+        },
+
+        {
+            "id": "replan_generic_02",
+            "title": "Analyze change impact",
+            "description": (
+                "Determine which parts of the existing plan "
+                "remain valid and which need adjustment."
+            ),
+            "tool": "ORBIT",
+            "risk": "low",
+            "depends_on": [
+                "replan_generic_01"
+            ],
+        },
+
+        {
+            "id": "replan_generic_03",
+            "title": "Update goal-specific plan",
+            "description": (
+                "Generate an updated execution plan that "
+                "continues to target the original goal."
+            ),
+            "tool": "ORBIT",
+            "risk": "low",
+            "depends_on": [
+                "replan_generic_02"
+            ],
+        },
+
+        {
+            "id": "replan_generic_04",
+            "title": "Verify updated outcome",
+            "description": (
+                "Verify that the revised workflow still "
+                "satisfies the original goal."
+            ),
+            "tool": "ORBIT",
+            "risk": "low",
+            "depends_on": [
+                "replan_generic_03"
+            ],
+        },
+    ]
+
+    verification = [
+        {
+            "id": "verify_generic_state",
+            "label": "Changed state incorporated",
+            "description": (
+                "The detected state change was incorporated."
+            ),
+        },
+
+        {
+            "id": "verify_generic_impact",
+            "label": "Change impact analyzed",
+            "description": (
+                "The effect of the change was evaluated."
+            ),
+        },
+
+        {
+            "id": "verify_generic_plan",
+            "label": "Goal-specific plan updated",
+            "description": (
+                "The revised plan continues targeting the original goal."
+            ),
+        },
+
+        {
+            "id": "verify_generic_outcome",
+            "label": "Original outcome preserved",
+            "description": (
+                "The replanned workflow remains aligned with "
+                "the original objective."
+            ),
+        },
+    ]
+
+    return {
+        "goal": goal_text,
+
+        "outcome": (
+            f"Continue working toward the original goal: {goal_text}"
+        ),
+
+        "current_state": [
+            "External state changed during execution.",
+            change_text,
+            "The previous workflow may contain outdated assumptions.",
+        ],
+
+        "tasks": tasks,
+
+        "verification": verification,
+    }
+
+
+# ============================================================
+# LOCAL FALLBACK COMPILER
+# ============================================================
+
+
+def fallback_compile_goal(
+    goal: str,
+) -> GoalCompilation:
+
+    goal_lower = goal.lower()
 
     # --------------------------------------------------------
     # PRESENTATION WORKFLOW
@@ -1107,6 +1825,7 @@ def fallback_compile_goal(
                         "been identified from Calendar."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_02",
                     label="Latest presentation files found",
@@ -1115,6 +1834,7 @@ def fallback_compile_goal(
                         "have been located in Drive."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_03",
                     label="Recent updates reviewed",
@@ -1123,6 +1843,7 @@ def fallback_compile_goal(
                         "has been reviewed."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_04",
                     label="Preparation plan completed",
@@ -1241,6 +1962,7 @@ def fallback_compile_goal(
                         "identified from Calendar."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_02",
                     label="Meeting documents retrieved",
@@ -1249,6 +1971,7 @@ def fallback_compile_goal(
                         "have been retrieved from Drive."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_03",
                     label="Meeting communication reviewed",
@@ -1257,6 +1980,7 @@ def fallback_compile_goal(
                         "has been reviewed."
                     ),
                 ),
+
                 VerificationCriterion(
                     id="verify_04",
                     label="Meeting readiness verified",
@@ -1374,753 +2098,6 @@ def fallback_compile_goal(
                 description=(
                     "ORBIT confirms that the requested "
                     "preparation is complete."
-                ),
-            ),
-        ],
-    )
-
-
-# ============================================================
-# LOCAL FALLBACK REPLANNER
-# ============================================================
-
-
-def fallback_replan_workflow(
-    goal: str,
-    previous_workflow: dict,
-    change_description: str,
-) -> dict:
-    """
-    Goal-aware deterministic replanning fallback.
-
-    The important rule is:
-    REPLANNING MUST PRESERVE THE ORIGINAL GOAL.
-
-    A change in state should modify the plan,
-    not replace the original objective with a
-    generic "re-check state" workflow.
-    """
-
-    goal_text = str(goal or "").strip()
-    change_text = str(
-        change_description or ""
-    ).strip()
-
-    goal_lower = goal_text.lower()
-
-    # -------------------------------------------------
-    # 1. INTERVIEW / PREPARATION GOALS
-    # -------------------------------------------------
-
-    if any(
-        keyword in goal_lower
-        for keyword in [
-            "interview",
-            "prepare for interview",
-            "interview preparation",
-        ]
-    ):
-        tasks = [
-            {
-                "id": "replan_interview_01",
-                "title": "Re-check interview requirements",
-                "description": (
-                    "Re-evaluate the information relevant to "
-                    "the interview after the detected state change."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [],
-            },
-            {
-                "id": "replan_interview_02",
-                "title": "Prioritize preparation",
-                "description": (
-                    "Adjust the interview preparation priorities "
-                    "based on the newly detected state."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_interview_01"
-                ],
-            },
-            {
-                "id": "replan_interview_03",
-                "title": "Update preparation plan",
-                "description": (
-                    "Create an updated preparation sequence "
-                    "that still targets the original interview goal."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_interview_02"
-                ],
-            },
-            {
-                "id": "replan_interview_04",
-                "title": "Verify interview readiness",
-                "description": (
-                    "Verify that the updated preparation plan "
-                    "still satisfies the original interview goal."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_interview_03"
-                ],
-            },
-        ]
-
-        verification = [
-            {
-                "id": "verify_interview_requirements",
-                "label": "Interview requirements re-evaluated",
-                "description": (
-                    "The changed state was incorporated into "
-                    "the interview preparation workflow."
-                ),
-            },
-            {
-                "id": "verify_interview_priorities",
-                "label": "Preparation priorities updated",
-                "description": (
-                    "Preparation priorities reflect the new state."
-                ),
-            },
-            {
-                "id": "verify_interview_plan",
-                "label": "Updated preparation plan created",
-                "description": (
-                    "A revised plan still targets the original goal."
-                ),
-            },
-            {
-                "id": "verify_interview_readiness",
-                "label": "Interview readiness verified",
-                "description": (
-                    "The revised plan remains aligned with "
-                    "the original interview preparation goal."
-                ),
-            },
-        ]
-
-        return {
-            "goal": goal_text,
-            "outcome": (
-                "Prepare successfully for the interview "
-                "using an updated plan that accounts for "
-                "the detected change."
-            ),
-            "current_state": [
-                "External state changed during execution.",
-                change_text,
-                "The previous plan may contain outdated assumptions.",
-            ],
-            "tasks": tasks,
-            "verification": verification,
-        }
-
-    # -------------------------------------------------
-    # 2. GYM / FITNESS PREPARATION GOALS
-    # -------------------------------------------------
-
-    if any(
-        keyword in goal_lower
-        for keyword in [
-            "gym",
-            "workout",
-            "exercise",
-            "fitness",
-        ]
-    ):
-        tasks = [
-            {
-                "id": "replan_gym_01",
-                "title": "Re-check workout timing",
-                "description": (
-                    "Re-evaluate the available preparation time "
-                    "after the detected change."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [],
-            },
-            {
-                "id": "replan_gym_02",
-                "title": "Prioritize gym preparation",
-                "description": (
-                    "Prioritize the preparation activities "
-                    "that are still necessary for the workout."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_gym_01"
-                ],
-            },
-            {
-                "id": "replan_gym_03",
-                "title": "Update gym preparation plan",
-                "description": (
-                    "Adjust the preparation sequence according "
-                    "to the newly detected state."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_gym_02"
-                ],
-            },
-            {
-                "id": "replan_gym_04",
-                "title": "Verify gym readiness",
-                "description": (
-                    "Verify that the updated preparation plan "
-                    "still satisfies the original gym goal."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_gym_03"
-                ],
-            },
-        ]
-
-        verification = [
-            {
-                "id": "verify_gym_timing",
-                "label": "Workout timing re-evaluated",
-                "description": (
-                    "Available preparation time was incorporated."
-                ),
-            },
-            {
-                "id": "verify_gym_priorities",
-                "label": "Preparation priorities updated",
-                "description": (
-                    "Required gym preparation activities were reprioritized."
-                ),
-            },
-            {
-                "id": "verify_gym_plan",
-                "label": "Updated gym plan created",
-                "description": (
-                    "A revised preparation plan was generated."
-                ),
-            },
-            {
-                "id": "verify_gym_readiness",
-                "label": "Gym readiness verified",
-                "description": (
-                    "The updated plan remains aligned with "
-                    "the original gym preparation goal."
-                ),
-            },
-        ]
-
-        return {
-            "goal": goal_text,
-            "outcome": (
-                "Be prepared for the workout using an updated "
-                "plan that accounts for the detected change."
-            ),
-            "current_state": [
-                "External state changed during execution.",
-                change_text,
-                "The previous preparation plan may contain outdated assumptions.",
-            ],
-            "tasks": tasks,
-            "verification": verification,
-        }
-
-    # -------------------------------------------------
-    # 3. MEETING GOALS
-    # -------------------------------------------------
-
-    if any(
-        keyword in goal_lower
-        for keyword in [
-            "meeting",
-            "meet",
-            "meeting preparation",
-        ]
-    ):
-        tasks = [
-            {
-                "id": "replan_meeting_01",
-                "title": "Re-check meeting details",
-                "description": (
-                    "Re-evaluate the latest meeting information "
-                    "after the detected change."
-                ),
-                "tool": "Calendar",
-                "risk": "low",
-                "depends_on": [],
-            },
-            {
-                "id": "replan_meeting_02",
-                "title": "Analyze meeting impact",
-                "description": (
-                    "Determine which preparation requirements "
-                    "changed as a result of the new state."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_meeting_01"
-                ],
-            },
-            {
-                "id": "replan_meeting_03",
-                "title": "Update meeting preparation",
-                "description": (
-                    "Create an updated preparation plan for "
-                    "the original meeting objective."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_meeting_02"
-                ],
-            },
-            {
-                "id": "replan_meeting_04",
-                "title": "Verify meeting readiness",
-                "description": (
-                    "Verify that the updated plan still "
-                    "satisfies the original meeting goal."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_meeting_03"
-                ],
-            },
-        ]
-
-        verification = [
-            {
-                "id": "verify_meeting_details",
-                "label": "Meeting details re-checked",
-                "description": (
-                    "Current meeting state was incorporated."
-                ),
-            },
-            {
-                "id": "verify_meeting_impact",
-                "label": "Meeting impact analyzed",
-                "description": (
-                    "The effect of the change was analyzed."
-                ),
-            },
-            {
-                "id": "verify_meeting_plan",
-                "label": "Meeting plan updated",
-                "description": (
-                    "The preparation workflow was updated."
-                ),
-            },
-            {
-                "id": "verify_meeting_readiness",
-                "label": "Meeting readiness verified",
-                "description": (
-                    "The revised workflow still satisfies "
-                    "the original meeting objective."
-                ),
-            },
-        ]
-
-        return {
-            "goal": goal_text,
-            "outcome": (
-                "Remain prepared for the meeting using an "
-                "updated plan that accounts for the detected change."
-            ),
-            "current_state": [
-                "External state changed during execution.",
-                change_text,
-                "Meeting information may have changed.",
-            ],
-            "tasks": tasks,
-            "verification": verification,
-        }
-
-    # -------------------------------------------------
-    # 4. EMAIL GOALS
-    # -------------------------------------------------
-
-    if any(
-        keyword in goal_lower
-        for keyword in [
-            "send email",
-            "email",
-            "mail",
-        ]
-    ):
-        tasks = [
-            {
-                "id": "replan_email_01",
-                "title": "Re-check email context",
-                "description": (
-                    "Re-evaluate the information required "
-                    "for the original email goal."
-                ),
-                "tool": "Gmail",
-                "risk": "low",
-                "depends_on": [],
-            },
-            {
-                "id": "replan_email_02",
-                "title": "Analyze impact of the change",
-                "description": (
-                    "Determine how the changed state affects "
-                    "the original email objective."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_email_01"
-                ],
-            },
-            {
-                "id": "replan_email_03",
-                "title": "Update email plan",
-                "description": (
-                    "Update the email workflow while preserving "
-                    "the original communication objective."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_email_02"
-                ],
-            },
-            {
-                "id": "replan_email_04",
-                "title": "Verify email readiness",
-                "description": (
-                    "Verify that the updated workflow is ready "
-                    "to satisfy the original email goal."
-                ),
-                "tool": "ORBIT",
-                "risk": "low",
-                "depends_on": [
-                    "replan_email_03"
-                ],
-            },
-        ]
-
-        verification = [
-            {
-                "id": "verify_email_context",
-                "label": "Email context re-checked",
-                "description": (
-                    "Required communication context was refreshed."
-                ),
-            },
-            {
-                "id": "verify_email_impact",
-                "label": "Change impact analyzed",
-                "description": (
-                    "The effect of the changed state was evaluated."
-                ),
-            },
-            {
-                "id": "verify_email_plan",
-                "label": "Email plan updated",
-                "description": (
-                    "The email workflow was updated."
-                ),
-            },
-            {
-                "id": "verify_email_readiness",
-                "label": "Email workflow verified",
-                "description": (
-                    "The updated workflow remains aligned "
-                    "with the original goal."
-                ),
-            },
-        ]
-
-        return {
-            "goal": goal_text,
-            "outcome": (
-                "Complete the original email objective using "
-                "an updated plan that accounts for the detected change."
-            ),
-            "current_state": [
-                "External state changed during execution.",
-                change_text,
-                "Previous email context may be outdated.",
-            ],
-            "tasks": tasks,
-            "verification": verification,
-        }
-
-    # -------------------------------------------------
-    # 5. GENERIC GOAL-AWARE FALLBACK
-    # -------------------------------------------------
-
-    previous_tasks = previous_workflow.get(
-        "tasks",
-        [],
-    )
-
-    first_tool = "ORBIT"
-
-    if previous_tasks:
-        previous_tools = [
-            str(task.get("tool", "ORBIT"))
-            for task in previous_tasks
-        ]
-
-        if previous_tools:
-            first_tool = previous_tools[0]
-
-    tasks = [
-        {
-            "id": "replan_generic_01",
-            "title": "Re-check goal state",
-            "description": (
-                "Re-evaluate the information affected by "
-                "the detected change while preserving the original goal."
-            ),
-            "tool": first_tool,
-            "risk": "low",
-            "depends_on": [],
-        },
-        {
-            "id": "replan_generic_02",
-            "title": "Analyze change impact",
-            "description": (
-                "Determine which parts of the existing plan "
-                "remain valid and which need adjustment."
-            ),
-            "tool": "ORBIT",
-            "risk": "low",
-            "depends_on": [
-                "replan_generic_01"
-            ],
-        },
-        {
-            "id": "replan_generic_03",
-            "title": "Update goal-specific plan",
-            "description": (
-                "Generate an updated execution plan that "
-                "continues to target the original goal."
-            ),
-            "tool": "ORBIT",
-            "risk": "low",
-            "depends_on": [
-                "replan_generic_02"
-            ],
-        },
-        {
-            "id": "replan_generic_04",
-            "title": "Verify updated outcome",
-            "description": (
-                "Verify that the revised workflow still "
-                "satisfies the original goal."
-            ),
-            "tool": "ORBIT",
-            "risk": "low",
-            "depends_on": [
-                "replan_generic_03"
-            ],
-        },
-    ]
-
-    verification = [
-        {
-            "id": "verify_generic_state",
-            "label": "Changed state incorporated",
-            "description": (
-                "The detected state change was incorporated."
-            ),
-        },
-        {
-            "id": "verify_generic_impact",
-            "label": "Change impact analyzed",
-            "description": (
-                "The effect of the change was evaluated."
-            ),
-        },
-        {
-            "id": "verify_generic_plan",
-            "label": "Goal-specific plan updated",
-            "description": (
-                "The revised plan continues targeting the original goal."
-            ),
-        },
-        {
-            "id": "verify_generic_outcome",
-            "label": "Original outcome preserved",
-            "description": (
-                "The replanned workflow remains aligned with "
-                "the original objective."
-            ),
-        },
-    ]
-
-    return {
-        "goal": goal_text,
-        "outcome": (
-            f"Continue working toward the original goal: {goal_text}"
-        ),
-        "current_state": [
-            "External state changed during execution.",
-            change_text,
-            "The previous workflow may contain outdated assumptions.",
-        ],
-        "tasks": tasks,
-        "verification": verification,
-    }
-
-    # --------------------------------------------------------
-    # EMAIL + MEETING REPLAN
-    # --------------------------------------------------------
-
-    email_goal = (
-        (
-            "send email" in original_lower
-            or "send an email" in original_lower
-            or "email the" in original_lower
-        )
-        and
-        (
-            "meeting" in original_lower
-            or "update" in original_lower
-            or "latest" in original_lower
-        )
-    )
-
-    if email_goal:
-
-        workflow = create_email_meeting_workflow(
-            original_goal
-        )
-
-        workflow.current_state = [
-            f"External state changed: {change_description}",
-            "Previous workflow information may be stale.",
-            "Affected Calendar, Drive and Gmail state must be re-checked.",
-        ]
-
-        workflow.constraints.append(
-            "Re-check changed external state before continuing."
-        )
-
-        return workflow
-
-    # --------------------------------------------------------
-    # GENERIC REPLAN
-    # --------------------------------------------------------
-
-    tasks = [
-        Task(
-            id="replan_task_01",
-            title="Re-check changed external state",
-            description=(
-                "Re-check the information affected by "
-                f"the detected change: {change_description}"
-            ),
-            tool="Gmail",
-            risk="low",
-            depends_on=[],
-        ),
-
-        Task(
-            id="replan_task_02",
-            title="Analyze impact of the change",
-            description=(
-                "Determine which parts of the previous "
-                "workflow are still valid and which need "
-                "to be updated."
-            ),
-            tool="ORBIT",
-            risk="low",
-            depends_on=[
-                "replan_task_01"
-            ],
-        ),
-
-        Task(
-            id="replan_task_03",
-            title="Update execution plan",
-            description=(
-                "Update the original execution plan using "
-                "the newly detected state."
-            ),
-            tool="ORBIT",
-            risk="low",
-            depends_on=[
-                "replan_task_02"
-            ],
-        ),
-
-        Task(
-            id="replan_task_04",
-            title="Verify updated plan",
-            description=(
-                "Verify that the replanned workflow still "
-                "satisfies the original goal after the change."
-            ),
-            tool="ORBIT",
-            risk="low",
-            depends_on=[
-                "replan_task_03"
-            ],
-        ),
-    ]
-
-    return GoalCompilation(
-        goal=original_goal,
-
-        outcome=(
-            "The original goal remains achievable using "
-            "an updated plan that accounts for the detected change."
-        ),
-
-        constraints=[
-            "Preserve the original goal.",
-            "Account for the detected external change.",
-            "Do not perform high-impact actions without approval.",
-        ],
-
-        current_state=[
-            f"External state changed: {change_description}",
-            "The previous workflow may contain outdated information.",
-        ],
-
-        tasks=tasks,
-
-        verification=[
-            VerificationCriterion(
-                id="replan_verify_01",
-                label="Changed state incorporated",
-                description=(
-                    "The replanned workflow accounts for "
-                    "the detected external change."
-                ),
-            ),
-
-            VerificationCriterion(
-                id="replan_verify_02",
-                label="Updated dependencies valid",
-                description=(
-                    "The updated task dependencies form "
-                    "a valid executable workflow."
-                ),
-            ),
-
-            VerificationCriterion(
-                id="replan_verify_03",
-                label="Original goal preserved",
-                description=(
-                    "The replanned workflow continues "
-                    "to target the original user goal."
                 ),
             ),
         ],
